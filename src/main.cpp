@@ -23,6 +23,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <vector>
+#include <algorithm>
+#include <cmath>
+#include <numeric>
+
 
 const char help_array[] =  "The following commands are supported:\n" \
                     " sevtool -[global opts] --[command] [command opts]\n" \
@@ -129,6 +134,7 @@ int main(int argc, char **argv)
         struct timespec start, end;
         long long totalTime = 0;  // To accumulate total time
         int repetitions = 1000;
+        std::vector<long long> timings;
         for(int i = 0; i < repetitions; i++) {
             clock_gettime(CLOCK_MONOTONIC, &start);
 
@@ -339,9 +345,34 @@ int main(int argc, char **argv)
 
             clock_gettime(CLOCK_MONOTONIC, &end);
             long long timeElapsed = ((long long)end.tv_sec * 1000000000 + end.tv_nsec) - ((long long)start.tv_sec * 1000000000 + start.tv_nsec);
+            timings.push_back(timeElapsed);
             totalTime += timeElapsed;
         }
-        printf("Average time for option %c: %f ms\n", c, (totalTime / repetitions) / 1e6);
+        // average
+        long long sum = std::accumulate(timings.begin(), timings.end(), 0LL);
+        double average = sum / static_cast<double>(timings.size());
+        // variance
+        double variance = 0.0;
+        for (const auto& timing : timings) {
+            variance += std::pow(timing - average, 2);
+        }
+        variance /= static_cast<double>(timings.size());
+        //standard deviation
+        double stddev = std::sqrt(variance);
+        //median
+        double median;
+        size_t size = timings.size();
+        std::sort(timings.begin(), timings.end());
+        if (size % 2 == 0) {
+            median = (timings[size / 2 - 1] + timings[size / 2]) / 2.0;
+        } else {
+            median = timings[size / 2];
+        }
+        printf("Average time for option %c: %f ms\n", c, average / 1e6);
+        printf("Variance for option %c: %f ms^2\n", c, variance / 1e12);
+        printf("Standard Deviation for option %c: %f ms\n", c, stddev / 1e6);
+        printf("Median time for option %c: %f ms\n", c, median / 1e6);
+
 
 
     }
