@@ -29,6 +29,8 @@
 #include <unistd.h>         // for close()
 #include <uuid/uuid.h>
 #include <stdexcept>        // for std::runtime_error()
+#include <chrono>
+#include <iostream>
 
 // -------------- Global Functions that don't require ioctls -------------- //
 void sev::get_family_model(uint32_t *family, uint32_t *model)
@@ -280,7 +282,11 @@ int SEVDevice::sev_ioctl(int cmd, void *data, int *cmd_ret)
         }
     }
 
+    auto start = std::chrono::high_resolution_clock::now();
     ioctl_ret = ioctl(get_fd(), SEV_ISSUE_CMD, &arg);
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> elapsed = end - start;
+    std::cout << "Elapsed time: " << elapsed.count() << " milliseconds" << std::endl;
     *cmd_ret = arg.error;
     // if (ioctl_ret != 0) {    // Sometimes you expect it to fail
     //     printf("Error: cmd %#x ioctl_ret=%d (%#x)\n", cmd, ioctl_ret, arg.error);
