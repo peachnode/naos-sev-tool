@@ -241,7 +241,7 @@ int main(int argc, char **argv)
             cmd_ret = perform_repetitions_and_analysis([&](std::vector<double> &measurements)
                                                        {
                 Command cmd(output_folder, verbose_flag);
-                return cmd.platform_status(measurements); });
+                return cmd.platform_status(measurements); }, repetitions);
             break;
         }
         case 'c': 
@@ -249,7 +249,7 @@ int main(int argc, char **argv)
             cmd_ret = perform_repetitions_and_analysis([&](std::vector<double> &measurements)
                                                        {
                 Command cmd(output_folder, verbose_flag);
-                return cmd.pek_gen(measurements); });
+                return cmd.pek_gen(measurements); }, repetitions);
             break;
         }
         case 'd':
@@ -257,7 +257,7 @@ int main(int argc, char **argv)
             cmd_ret = perform_repetitions_and_analysis([&](std::vector<double> &measurements)
                                                        {
                 Command cmd(output_folder, verbose_flag);
-                return cmd.pek_csr(measurements); });
+                return cmd.pek_csr(measurements); }, repetitions);
             break;
         }
         case 'e':
@@ -265,7 +265,7 @@ int main(int argc, char **argv)
             cmd_ret = perform_repetitions_and_analysis([&](std::vector<double> &measurements)
                                                        {
                 Command cmd(output_folder, verbose_flag);
-                return cmd.pdh_gen(measurements); });
+                return cmd.pdh_gen(measurements); }, repetitions);
             break;
         }
         case 'f':
@@ -273,7 +273,7 @@ int main(int argc, char **argv)
             cmd_ret = perform_repetitions_and_analysis([&](std::vector<double> &measurements)
                                                        {
                 Command cmd(output_folder, verbose_flag);
-                return cmd.pdh_cert_export(measurements); });
+                return cmd.pdh_cert_export(measurements); }, repetitions);
             break;
         }
         case 'g':
@@ -289,7 +289,7 @@ int main(int argc, char **argv)
             cmd_ret = perform_repetitions_and_analysis([&](std::vector<double> &measurements)
                                                        {
                 Command cmd(output_folder, verbose_flag);
-                return cmd.pek_cert_import(signed_pek_csr_file, oca_cert_file); });
+                return cmd.pek_cert_import(signed_pek_csr_file, oca_cert_file); }, repetitions);
 
             break;
         }
@@ -298,7 +298,7 @@ int main(int argc, char **argv)
             cmd_ret = perform_repetitions_and_analysis([&](std::vector<double> &measurements)
                                                        {
                 Command cmd(output_folder, verbose_flag);
-                return cmd.get_id(measurements); });
+                return cmd.get_id(measurements); }, repetitions);
             break;
         }
         case 'k':
