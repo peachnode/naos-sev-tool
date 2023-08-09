@@ -78,6 +78,7 @@ const char help_array[] = "The following commands are supported:\n"
 
 /* Flag set by '--verbose' */
 static int verbose_flag = 0;
+static int repetitions = 1; 
 
 static struct option long_options[] =
     {
@@ -100,6 +101,7 @@ static struct option long_options[] =
         {"generate_cek_ask", no_argument, 0, 'm'},
         {"export_cert_chain", no_argument, 0, 'p'},
         {"export_cert_chain_vcek", no_argument, 0, 'q'},
+        {"repetitions", required_argument, 0, 'r'},
         {"sign_pek_csr", required_argument, 0, 's'},
         /* Guest Owner commands */
         {"get_ask_ark", no_argument, 0, 'n'},
@@ -182,7 +184,7 @@ int main(int argc, char **argv)
 
     int cmd_ret = 0xFFFF;
 
-    while ((c = getopt_long(argc, argv, "hio:", long_options, &option_index)) != -1)
+    while ((c = getopt_long(argc, argv, "hio:r:", long_options, &option_index)) != -1)
     {
 
         switch (c)
@@ -231,7 +233,7 @@ int main(int argc, char **argv)
             cmd_ret = perform_repetitions_and_analysis([&](std::vector<double> &measurements)
                                                        {
                 Command cmd(output_folder, verbose_flag);
-                return cmd.factory_reset(measurements); });
+                return cmd.factory_reset(measurements); }, repetitions);
             break;
         }
         case 'b':
@@ -341,6 +343,16 @@ int main(int argc, char **argv)
         { // EXPORT_CERT_CHAIN_VCEK
             Command cmd(output_folder, verbose_flag);
             cmd_ret = cmd.export_cert_chain_vcek();
+            break;
+        }
+        case 'r':
+        {
+            repetitions = atoi(optarg);
+            if (repetitions <= 0)
+            {
+                printf("Error: Invalid repetitions value %d. Using default.\n", repetitions);
+                repetitions = 1;  // Reset to default
+            }
             break;
         }
         case 's':

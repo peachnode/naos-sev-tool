@@ -113,7 +113,7 @@ configure:2765: $? = 0
 configure:2777: result: yes
 configure:2795: checking for library containing EVP_PKEY_base_id
 configure:2826: gcc -o conftest -g -O2   conftest.c  >&5
-/usr/bin/ld: /tmp/ccutiF58.o: in function `main':
+/usr/bin/ld: /tmp/ccVJqVFY.o: in function `main':
 /home/naomi/naos-sev-tool/conftest.c:20: undefined reference to `EVP_PKEY_base_id'
 collect2: error: ld returned 1 exit status
 configure:2826: $? = 1
