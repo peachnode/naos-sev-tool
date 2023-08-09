@@ -26,34 +26,36 @@
 #include <fstream>
 #include <cstdio>
 #include <string>
+#include <vector>
 
-const std::string DEFAULT_SEV_DEVICE     = "/dev/sev";
+const std::string DEFAULT_SEV_DEVICE = "/dev/sev";
 
-#define AMD_SEV_DEVELOPER_SITE    "https://developer.amd.com/sev/"
-#define ASK_ARK_PATH_SITE         "https://download.amd.com/developer/eula/sev/"
+#define AMD_SEV_DEVELOPER_SITE "https://developer.amd.com/sev/"
+#define ASK_ARK_PATH_SITE "https://download.amd.com/developer/eula/sev/"
 
-const std::string ASK_ARK_NAPLES_FILE    = "ask_ark_naples.cert";
-const std::string ASK_ARK_ROME_FILE      = "ask_ark_rome.cert";
-const std::string ASK_ARK_MILAN_FILE     = "ask_ark_milan.cert";
-const std::string ASK_ARK_NAPLES_SITE    = ASK_ARK_PATH_SITE + ASK_ARK_NAPLES_FILE;
-const std::string ASK_ARK_ROME_SITE      = ASK_ARK_PATH_SITE + ASK_ARK_ROME_FILE;
-const std::string ASK_ARK_MILAN_SITE     = ASK_ARK_PATH_SITE + ASK_ARK_MILAN_FILE;
+const std::string ASK_ARK_NAPLES_FILE = "ask_ark_naples.cert";
+const std::string ASK_ARK_ROME_FILE = "ask_ark_rome.cert";
+const std::string ASK_ARK_MILAN_FILE = "ask_ark_milan.cert";
+const std::string ASK_ARK_NAPLES_SITE = ASK_ARK_PATH_SITE + ASK_ARK_NAPLES_FILE;
+const std::string ASK_ARK_ROME_SITE = ASK_ARK_PATH_SITE + ASK_ARK_ROME_FILE;
+const std::string ASK_ARK_MILAN_SITE = ASK_ARK_PATH_SITE + ASK_ARK_MILAN_FILE;
 
-constexpr uint32_t NAPLES_FAMILY     = 0x17UL;      // 23
-constexpr uint32_t NAPLES_MODEL_LOW  = 0x00UL;
+constexpr uint32_t NAPLES_FAMILY = 0x17UL; // 23
+constexpr uint32_t NAPLES_MODEL_LOW = 0x00UL;
 constexpr uint32_t NAPLES_MODEL_HIGH = 0x0FUL;
-constexpr uint32_t ROME_FAMILY       = 0x17UL;      // 23
-constexpr uint32_t ROME_MODEL_LOW    = 0x30UL;
-constexpr uint32_t ROME_MODEL_HIGH   = 0x3FUL;
-constexpr uint32_t MILAN_FAMILY      = 0x19UL;      // 25
-constexpr uint32_t MILAN_MODEL_LOW   = 0x00UL;
-constexpr uint32_t MILAN_MODEL_HIGH  = 0x0FUL;
+constexpr uint32_t ROME_FAMILY = 0x17UL; // 23
+constexpr uint32_t ROME_MODEL_LOW = 0x30UL;
+constexpr uint32_t ROME_MODEL_HIGH = 0x3FUL;
+constexpr uint32_t MILAN_FAMILY = 0x19UL; // 25
+constexpr uint32_t MILAN_MODEL_LOW = 0x00UL;
+constexpr uint32_t MILAN_MODEL_HIGH = 0x0FUL;
 
-enum __attribute__((mode(QI))) ePSP_DEVICE_TYPE {
+enum __attribute__((mode(QI))) ePSP_DEVICE_TYPE
+{
     PSP_DEVICE_TYPE_INVALID = 0,
-    PSP_DEVICE_TYPE_NAPLES  = 1,
-    PSP_DEVICE_TYPE_ROME    = 2,
-    PSP_DEVICE_TYPE_MILAN   = 3,
+    PSP_DEVICE_TYPE_NAPLES = 1,
+    PSP_DEVICE_TYPE_ROME = 2,
+    PSP_DEVICE_TYPE_MILAN = 3,
 };
 
 /**
@@ -61,53 +63,55 @@ enum __attribute__((mode(QI))) ePSP_DEVICE_TYPE {
  * Used to test the SEV FW detects such invalid addresses and returns the
  * correct error return value.
  */
-constexpr uint64_t INVALID_ADDRESS  = (0xFFF00000018); // Needs to be bigger than 0xFFCFFFFFFFF (16TB memory)
-constexpr uint32_t BAD_ASID         = ((uint32_t)~0);
-constexpr uint32_t BAD_DEVICE_TYPE  = ((uint32_t)~0);
+constexpr uint64_t INVALID_ADDRESS = (0xFFF00000018); // Needs to be bigger than 0xFFCFFFFFFFF (16TB memory)
+constexpr uint32_t BAD_ASID = ((uint32_t)~0);
+constexpr uint32_t BAD_DEVICE_TYPE = ((uint32_t)~0);
 constexpr uint32_t BAD_FAMILY_MODEL = ((uint32_t)~0);
 
 // Platform Status Buffer flags param was split up into owner/ES in API v0.17
-constexpr uint8_t  PLAT_STAT_OWNER_OFFSET    = 0;
-constexpr uint8_t  PLAT_STAT_CONFIGES_OFFSET = 8;
-constexpr uint32_t PLAT_STAT_OWNER_MASK      = (1U << PLAT_STAT_OWNER_OFFSET);
-constexpr uint32_t PLAT_STAT_ES_MASK         = (1U << PLAT_STAT_CONFIGES_OFFSET);
+constexpr uint8_t PLAT_STAT_OWNER_OFFSET = 0;
+constexpr uint8_t PLAT_STAT_CONFIGES_OFFSET = 8;
+constexpr uint32_t PLAT_STAT_OWNER_MASK = (1U << PLAT_STAT_OWNER_OFFSET);
+constexpr uint32_t PLAT_STAT_ES_MASK = (1U << PLAT_STAT_CONFIGES_OFFSET);
 
 namespace sev
 {
-// Global Functions that don't require ioctls
-void get_family_model(uint32_t *family, uint32_t *model);
-ePSP_DEVICE_TYPE get_device_type(void);
-bool min_api_version(unsigned platform_major, unsigned platform_minor,
-                     unsigned api_major, unsigned api_minor);
-int get_ask_ark(const std::string output_folder, const std::string cert_file);
-int get_ask_ark_pem(const std::string output_folder, const std::string cert_chain_file,
-                    const std::string ask_file, const std::string ark_file);
-int zip_certs(const std::string output_folder, const std::string zip_name,
-              const std::string files_to_zip);
+    // Global Functions that don't require ioctls
+    void get_family_model(uint32_t *family, uint32_t *model);
+    ePSP_DEVICE_TYPE get_device_type(void);
+    bool min_api_version(unsigned platform_major, unsigned platform_minor,
+                         unsigned api_major, unsigned api_minor);
+    int get_ask_ark(const std::string output_folder, const std::string cert_file);
+    int get_ask_ark_pem(const std::string output_folder, const std::string cert_chain_file,
+                        const std::string ask_file, const std::string ark_file);
+    int zip_certs(const std::string output_folder, const std::string zip_name,
+                  const std::string files_to_zip);
 } // namespace
 
 // Class to access the special SEV FW API test suite driver.
-class SEVDevice {
+class SEVDevice
+{
 private:
     int mFd;
 
     inline int get_fd(void) { return mFd; }
     int sev_ioctl(int cmd, void *data, int *cmd_ret);
+    int sev_ioctl(int cmd, void *data, int *cmd_ret, std::vector<double> &measurements);
 
     std::string display_build_info(void);
 
     // Do NOT create ANY other constructors or destructors of any kind.
-    SEVDevice(void)  = default;
+    SEVDevice(void) = default;
 
     // Delete the copy and assignment operators which
     // may be automatically created by the compiler. The user
     // should not be able to modify the SEVDevice, as it is unique.
-    SEVDevice(const SEVDevice&) = delete;
-    SEVDevice& operator=(const SEVDevice&) = delete;
+    SEVDevice(const SEVDevice &) = delete;
+    SEVDevice &operator=(const SEVDevice &) = delete;
 
 public:
     // Singleton Constructor - Threadsafe in C++ 11 and greater.
-    static SEVDevice& get_sev_device(void);
+    static SEVDevice &get_sev_device(void);
 
     // Do NOT create ANY other constructors or destructors of any kind.
     ~SEVDevice(void);
@@ -119,16 +123,27 @@ public:
      * Each function sets the params in data to the input/output variables of
      *   the function
      */
+
     int factory_reset(void);
+    int factory_reset(std::vector<double> &measurements);
     int platform_status(uint8_t *data);
+    int platform_status(uint8_t *data, std::vector<double> &measurements);
     int pek_gen(void);
+    int pek_gen(std::vector<double> &measurements);
+
     int pek_csr(uint8_t *data, void *pek_mem, sev_cert *csr);
+    int pek_csr(uint8_t *data, void *pek_mem, sev_cert *csr, std::vector<double> &measurements);
     int pdh_gen(void);
+    int pdh_gen(std::vector<double> &measurements);
     int pdh_cert_export(uint8_t *data, void *pdh_cert_mem,
                         void *cert_chain_mem);
+    int pdh_cert_export(uint8_t *data, void *pdh_cert_mem, void *cert_chain_mem, std::vector<double> &measurements);
     int pek_cert_import(uint8_t *data, sev_cert *pek_csr,
                         sev_cert *oca_cert);
+    int pek_cert_import(uint8_t *data, sev_cert *pek_csr,
+                        sev_cert *oca_cert, std::vector<double> &measurements);
     int get_id(void *data, void *id_mem, uint32_t id_length = 0);
+    int get_id(void *data, void *id_mem, std::vector<double> &measurements, uint32_t id_length = 0);
 
     int sys_info();
     int set_self_owned(void);
@@ -136,11 +151,20 @@ public:
     int get_platform_es(void *data);
     int generate_cek_ask(const std::string output_folder,
                          const std::string cert_file);
+    int generate_cek_ask(const std::string output_folder,
+                         const std::string cert_file, std::vector<double> &measurements);
+
     int generate_vcek_ask(const std::string output_folder,
                           const std::string vcek_der_file,
                           const std::string vcek_pem_file);
+    int generate_vcek_ask(const std::string output_folder,
+                          const std::string vcek_der_file,
+                          const std::string vcek_pem_file, std::vector<double> &measurements);
     int request_platform_status(snp_platform_status_buffer *plat_status);
+    int request_platform_status(snp_platform_status_buffer *plat_status, std::vector<double> &measurements);
     void request_tcb_data(snp_tcb_version &tcb_data);
+
+    // Overloading existing functions with std::vector<double>& measurements
 };
 
 #endif /* SEVCORE_H */

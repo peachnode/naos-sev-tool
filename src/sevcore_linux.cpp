@@ -31,6 +31,7 @@
 #include <stdexcept>        // for std::runtime_error()
 #include <chrono>
 #include <iostream>
+#include <vector>
 
 // -------------- Global Functions that don't require ioctls -------------- //
 void sev::get_family_model(uint32_t *family, uint32_t *model)
@@ -252,8 +253,46 @@ SEVDevice& SEVDevice::get_sev_device(void)
     }
     return m_sev_device;
 }
-
 int SEVDevice::sev_ioctl(int cmd, void *data, int *cmd_ret)
+{
+    int ioctl_ret = -1;
+    sev_issue_cmd arg;
+
+    arg.cmd = (uint32_t)cmd;
+    arg.data = (uint64_t)data;
+
+    if (cmd == SEV_GET_ID) {
+        /*
+         * Note: There is a cache alignment bug in Naples SEV Firmware
+         *       version < 0.17.19 where it will sometimes return the wrong
+         *       value of P0. This happens when it's the first command run after
+         *       a bootup or when it's run a few seconds after switching between
+         *       self-owned and externally-owned (both directions).
+         */
+        sev_user_data_status status_data;  // Platform Status
+        *cmd_ret = platform_status((uint8_t *)&status_data);
+        if (*cmd_ret != 0)
+            return ioctl_ret;
+
+        if (status_data.api_major == 0 && status_data.api_minor <= 17 &&
+            status_data.build < 19) {
+            printf("Adding a 5 second delay to account for Naples GetID bug...\n");
+            ioctl_ret = ioctl(get_fd(), SEV_ISSUE_CMD, &arg);
+            usleep(5000000);    // 5 seconds
+        }
+    }
+
+
+    ioctl_ret = ioctl(get_fd(), SEV_ISSUE_CMD, &arg);
+
+    *cmd_ret = arg.error;
+    // if (ioctl_ret != 0) {    // Sometimes you expect it to fail
+    //     printf("Error: cmd %#x ioctl_ret=%d (%#x)\n", cmd, ioctl_ret, arg.error);
+    // }
+
+    return ioctl_ret;
+}
+int SEVDevice::sev_ioctl(int cmd, void *data, int *cmd_ret, std::vector<double>& measurements)
 {
     int ioctl_ret = -1;
     sev_issue_cmd arg;
@@ -286,7 +325,7 @@ int SEVDevice::sev_ioctl(int cmd, void *data, int *cmd_ret)
     ioctl_ret = ioctl(get_fd(), SEV_ISSUE_CMD, &arg);
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> elapsed = end - start;
-    std::cout << "Elapsed time: " << elapsed.count() << " milliseconds" << std::endl;
+    measurements.push_back(elapsed.count());
     *cmd_ret = arg.error;
     // if (ioctl_ret != 0) {    // Sometimes you expect it to fail
     //     printf("Error: cmd %#x ioctl_ret=%d (%#x)\n", cmd, ioctl_ret, arg.error);
@@ -294,8 +333,7 @@ int SEVDevice::sev_ioctl(int cmd, void *data, int *cmd_ret)
 
     return ioctl_ret;
 }
-
-int SEVDevice::factory_reset()
+int SEVDevice::factory_reset(void)
 {
     uint32_t data;      // Can't pass null
     int cmd_ret = SEV_RET_UNSUPPORTED;
@@ -304,6 +342,19 @@ int SEVDevice::factory_reset()
     memset(&data, 0, sizeof(data));
 
     sev_ioctl(SEV_FACTORY_RESET, &data, &cmd_ret);
+
+    return (int)cmd_ret;
+}
+
+int SEVDevice::factory_reset(std::vector<double>& measurements)
+{
+    uint32_t data;      // Can't pass null
+    int cmd_ret = SEV_RET_UNSUPPORTED;
+
+    // Set struct to 0
+    memset(&data, 0, sizeof(data));
+
+    sev_ioctl(SEV_FACTORY_RESET, &data, &cmd_ret, measurements);
 
     return (int)cmd_ret;
 }
@@ -317,7 +368,6 @@ int SEVDevice::get_platform_es(void *data)
 {
     return ((sev_user_data_status *)data)->flags & PLAT_STAT_ES_MASK;
 }
-
 int SEVDevice::platform_status(uint8_t *data)
 {
     int cmd_ret = SEV_RET_UNSUPPORTED;
@@ -329,6 +379,20 @@ int SEVDevice::platform_status(uint8_t *data)
 
     return (int)cmd_ret;
 }
+
+
+int SEVDevice::platform_status(uint8_t *data, std::vector<double>& measurements)
+{
+    int cmd_ret = SEV_RET_UNSUPPORTED;
+
+    // Set struct to 0
+    memset(data, 0, sizeof(sev_user_data_status));
+
+    sev_ioctl(SEV_PLATFORM_STATUS, data, &cmd_ret, measurements);
+
+    return (int)cmd_ret;
+}
+
 
 int SEVDevice::pek_gen()
 {
@@ -343,6 +407,18 @@ int SEVDevice::pek_gen()
     return (int)cmd_ret;
 }
 
+int SEVDevice::pek_gen(std::vector<double>& measurements)
+{
+    uint32_t data;      // Can't pass null
+    int cmd_ret = SEV_RET_UNSUPPORTED;
+
+    // Set struct to 0
+    memset(&data, 0, sizeof(data));
+
+    sev_ioctl(SEV_PEK_GEN, &data, &cmd_ret, measurements);
+
+    return (int)cmd_ret;
+}
 
 int SEVDevice::pek_csr(uint8_t *data, void *pek_mem, sev_cert *csr)
 {
@@ -385,6 +461,47 @@ int SEVDevice::pek_csr(uint8_t *data, void *pek_mem, sev_cert *csr)
     return (int)cmd_ret;
 }
 
+int SEVDevice::pek_csr(uint8_t *data, void *pek_mem, sev_cert *csr, std::vector<double> &measurments)
+{
+    int cmd_ret = SEV_RET_UNSUPPORTED;
+    int ioctl_ret = -1;
+    sev_user_data_pek_csr *data_buf = (sev_user_data_pek_csr *)data;
+    SEVCert csr_obj(csr);
+
+    // Set struct to 0
+    memset(data_buf, 0, sizeof(sev_user_data_pek_csr));
+
+    do {
+        // Populate PEKCSR buffer with CSRLength = 0
+        data_buf->address = (uint64_t)pek_mem;
+        data_buf->length = 0;
+
+        // Send the command. This is to get the MinSize length. If you
+        // already know it, then you don't have to send the command twice
+        ioctl_ret = sev_ioctl(SEV_PEK_CSR, data_buf, &cmd_ret, measurments);
+        if (ioctl_ret != -1)
+            break;
+
+        // Verify the results. Now the CSRLength will be updated to MinSize
+        if (cmd_ret != SEV_RET_INVALID_LEN)
+            break;
+
+        // Send the command again with CSRLength=MinSize
+        ioctl_ret = sev_ioctl(SEV_PEK_CSR, data_buf, &cmd_ret, measurments);
+        if (ioctl_ret != 0)
+            break;
+
+        // Verify the CSR complies to API specification
+        memcpy(csr, (sev_cert*)data_buf->address, sizeof(sev_cert));
+        if (csr_obj.validate_pek_csr() != STATUS_SUCCESS) {
+            cmd_ret = SEV_RET_INVALID_CERTIFICATE;
+            break;
+        }
+    } while (0);
+
+    return (int)cmd_ret;
+}
+
 int SEVDevice::pdh_gen()
 {
     uint32_t data;      // Can't pass null
@@ -394,6 +511,19 @@ int SEVDevice::pdh_gen()
     memset(&data, 0, sizeof(data));
 
     sev_ioctl(SEV_PDH_GEN, &data, &cmd_ret);
+
+    return (int)cmd_ret;
+}
+
+int SEVDevice::pdh_gen(std::vector<double>& measurements)
+{
+    uint32_t data;      // Can't pass null
+    int cmd_ret = SEV_RET_UNSUPPORTED;
+
+    // Set struct to 0
+    memset(&data, 0, sizeof(data));
+
+    sev_ioctl(SEV_PDH_GEN, &data, &cmd_ret, measurements);
 
     return (int)cmd_ret;
 }
@@ -416,6 +546,32 @@ int SEVDevice::pdh_cert_export(uint8_t *data, void *pdh_cert_mem,
 
         // Send the command
         ioctl_ret = sev_ioctl(SEV_PDH_CERT_EXPORT, data_buf, &cmd_ret);
+        if (ioctl_ret != 0)
+            break;
+
+    } while (0);
+
+    return (int)cmd_ret;
+}
+
+int SEVDevice::pdh_cert_export(uint8_t *data, void *pdh_cert_mem,
+                               void *cert_chain_mem, std::vector<double>& measurements)
+{
+    int cmd_ret = SEV_RET_UNSUPPORTED;
+    int ioctl_ret = -1;
+    sev_user_data_pdh_cert_export *data_buf = (sev_user_data_pdh_cert_export *)data;
+
+    // Set struct to 0
+    memset(data_buf, 0, sizeof(sev_user_data_pdh_cert_export));
+
+    do {
+        data_buf->pdh_cert_address = (uint64_t)pdh_cert_mem;
+        data_buf->pdh_cert_len = sizeof(sev_cert);
+        data_buf->cert_chain_address = (uint64_t)cert_chain_mem;
+        data_buf->cert_chain_len = sizeof(sev_cert_chain_buf);
+
+        // Send the command
+        ioctl_ret = sev_ioctl(SEV_PDH_CERT_EXPORT, data_buf, &cmd_ret, measurements);
         if (ioctl_ret != 0)
             break;
 
@@ -447,6 +603,37 @@ int SEVDevice::pek_cert_import(uint8_t *data, sev_cert *signed_pek_csr,
 
         // Send the command
         ioctl_ret = sev_ioctl(SEV_PEK_CERT_IMPORT, data_buf, &cmd_ret);
+        if (ioctl_ret != 0)
+            break;
+
+    } while (0);
+
+    return (int)cmd_ret;
+}
+
+int SEVDevice::pek_cert_import(uint8_t *data, sev_cert *signed_pek_csr,
+                               sev_cert *oca_cert, std::vector<double>& measurements)
+{
+    int cmd_ret = SEV_RET_UNSUPPORTED;
+    int ioctl_ret = -1;
+    sev_user_data_pek_cert_import *data_buf = (sev_user_data_pek_cert_import *)data;
+    memset(data_buf, 0, sizeof(sev_user_data_pek_cert_import));
+
+    do {
+        // Verify signed CSR complies to API specification
+        SEVCert cert_obj(signed_pek_csr);
+        if (cert_obj.verify_signed_pek_csr(oca_cert) != STATUS_SUCCESS) {
+            cmd_ret = SEV_RET_INVALID_CERTIFICATE;
+            break;
+        }
+
+        data_buf->pek_cert_address = (uint64_t)signed_pek_csr;
+        data_buf->pek_cert_len = sizeof(sev_cert);
+        data_buf->oca_cert_address = (uint64_t)oca_cert;
+        data_buf->oca_cert_len = sizeof(sev_cert);
+
+        // Send the command
+        ioctl_ret = sev_ioctl(SEV_PEK_CERT_IMPORT, data_buf, &cmd_ret, measurements);
         if (ioctl_ret != 0)
             break;
 
@@ -490,7 +677,40 @@ int SEVDevice::get_id(void *data, void *id_mem, uint32_t id_length)
 
     return (int)cmd_ret;
 }
+int SEVDevice::get_id(void *data, void *id_mem, std::vector<double>& measurements, uint32_t id_length)
+{
+    int cmd_ret = SEV_RET_UNSUPPORTED;
+    int ioctl_ret = -1;
+    sev_user_data_get_id id_buf;    // Linux buffer is different than API spec. Don't point it to *data
 
+    // Set struct to 0
+    memset(&id_buf, 0, sizeof(sev_user_data_get_id));
+
+    do {
+        if (id_length != 128) {  // Linux is hard-coded to 128 bytes
+            id_length = 64;        // PSP returns length of 1 ID, if length isn't correct
+            cmd_ret = SEV_RET_INVALID_LEN;
+            break;
+        }
+
+        // Send the command
+        ioctl_ret = sev_ioctl(SEV_GET_ID, &id_buf, &cmd_ret, measurements);
+        if (ioctl_ret != 0)
+            break;
+
+        // Copy the resulting IDs into the real buffer allocated for them
+        memcpy(id_mem, &id_buf, id_length);
+    } while (0);
+
+    // The other functions in this file can do a direct mapping of the Linux
+    //   struct to the SEV API struct in sevapi.h, however, for this function,
+    //   this Linux struct doesn't match (at all) the API
+    // Hard coded hack mapping to sevapi.h. Don't want to include sevapi.h in this file
+    ((uint64_t *)data)[0] = (uint64_t)id_mem;      // Set address of id_mem as 64 bit PAddr from sevapi.h
+    ((uint32_t *)data)[2] = id_length;  // 3rd 32-bit chunk in the cmd_buf
+
+    return (int)cmd_ret;
+}
 std::string SEVDevice::display_build_info(void)
 {
     SEVDevice sev_device;
@@ -679,6 +899,85 @@ int SEVDevice::generate_cek_ask(const std::string output_folder,
     return cmd_ret;
 }
 
+int SEVDevice::generate_cek_ask(const std::string output_folder,
+                                const std::string cert_file, std::vector<double>& measurements)
+{
+    int cmd_ret = SEV_RET_UNSUPPORTED;
+    int ioctl_ret = -1;
+    sev_user_data_get_id id_buf;
+    std::string cmd = "wget ";
+    std::string output = "";
+    std::string to_cert_w_path = output_folder + cert_file;
+
+    // Set struct to 0
+    memset(&id_buf, 0, sizeof(sev_user_data_get_id));
+
+    do {
+        cmd += "-P " + output_folder + " ";
+        cmd += KDS_CEK;
+
+        // Get the ID of the Platform
+        // Send the command
+        ioctl_ret = sev_ioctl(SEV_GET_ID, &id_buf, &cmd_ret, measurements);
+        if (ioctl_ret != 0)
+            break;
+
+        // Copy the resulting IDs into the real buffer allocated for them
+        // Note that Linux referrs to P0 and P1 as socket1 and socket2 (which is incorrect).
+        //   So below, we are getting the ID for P0, which is the first socket
+        char id0_buf[sizeof(id_buf.socket1)*2+1] = {0};  // 2 chars per byte +1 for null term
+        for (uint8_t i = 0; i < sizeof(id_buf.socket1); i++)
+        {
+            sprintf(id0_buf+strlen(id0_buf), "%02x", id_buf.socket1[i]);
+        }
+        cmd += id0_buf;
+
+        // Don't re-download the CEK from the KDS server if you already have it
+        if (sev::get_file_size(to_cert_w_path) != 0) {
+            // printf("CEK already exists, not re-downloading\n");
+            cmd_ret = SEV_RET_SUCCESS;
+            break;
+        }
+
+        // The AMD KDS server only accepts requests every 10 seconds
+        std::string cert_w_path = output_folder + id0_buf;
+        bool cert_found = false;
+        int sec_to_sleep = 6;
+        int retries = 0;
+        int max_retries = (int)((10/sec_to_sleep)+2);
+        while (!cert_found && retries <= max_retries) {
+            if (!sev::execute_system_command(cmd, &output)) {
+                printf("Error: pipe not opened for system command\n");
+                cmd_ret = SEV_RET_UNSUPPORTED;
+                break;
+            }
+
+            // Check if the file got downloaded
+            if (sev::get_file_size(cert_w_path) != 0) {
+                cert_found = true;
+                break;
+            }
+            sleep(sec_to_sleep);
+            printf("Trying again\n");
+            retries++;
+        }
+        if (!cert_found) {
+            printf("Error: command to get cek_ask cert failed\n");
+            cmd_ret = SEV_RET_UNSUPPORTED;
+            break;
+        }
+
+        // Copy the file from (get_id) name to something known (cert_file)
+        if (std::rename(cert_w_path.c_str(), to_cert_w_path.c_str()) != 0) {
+            printf("Error: renaming cek cert file\n");
+            cmd_ret = SEV_RET_UNSUPPORTED;
+            break;
+        }
+    } while (0);
+
+    return cmd_ret;
+}
+
 int SEVDevice::generate_vcek_ask(const std::string output_folder,
                                  const std::string vcek_der_file,
                                  const std::string vcek_pem_file)
@@ -767,13 +1066,111 @@ int SEVDevice::generate_vcek_ask(const std::string output_folder,
 
     return cmd_ret;
 }
+int SEVDevice::generate_vcek_ask(const std::string output_folder,
+                                 const std::string vcek_der_file,
+                                 const std::string vcek_pem_file,
+                                 std::vector<double>& measurements)
+{
+    int cmd_ret = SEV_RET_UNSUPPORTED;
+    int ioctl_ret = -1;
+    sev_user_data_get_id id_buf;
+    // char cmd[235];
+    std::string cmd = "wget ";
+    std::string output = "";
+    std::string der_cert_w_path = output_folder + vcek_der_file;
+    std::string pem_cert_w_path = output_folder + vcek_pem_file;
 
+    // Set struct to 0
+    memset(&id_buf, 0, sizeof(sev_user_data_get_id));
+
+    do {
+        cmd += "-O " + der_cert_w_path + " \"";
+        cmd += KDS_VCEK;
+        cmd += "Milan/";
+
+
+        // Get the ID of the Platform
+        // Send the command
+        ioctl_ret = sev_ioctl(SEV_GET_ID, &id_buf, &cmd_ret, measurements);
+        if (ioctl_ret != 0)
+            break;
+
+        // Copy the resulting IDs into the real buffer allocated for them
+        // Note that Linux referrs to P0 and P1 as socket1 and socket2 (which is incorrect).
+        //   So below, we are getting the ID for P0, which is the first socket
+        char id0_buf[sizeof(id_buf.socket1)*2+1] = {0};  // 2 chars per byte +1 for null term
+        for (uint8_t i = 0; i < sizeof(id_buf.socket1); i++)
+        {
+            sprintf(id0_buf+strlen(id0_buf), "%02x", id_buf.socket1[i]);
+        }
+        cmd += id0_buf;
+        // Create a container to store the TCB Version in.
+        snp_tcb_version tcb_data = {.val = 0};
+
+        // Get the TCB version of the Platform
+        request_tcb_data(tcb_data);
+
+        cmd += "?blSPL=" + std::to_string(tcb_data.f.boot_loader);
+        cmd += "&teeSPL=" + std::to_string(tcb_data.f.tee);
+        cmd += "&snpSPL=" + std::to_string(tcb_data.f.snp);
+        cmd += "&ucodeSPL=" + std::to_string(tcb_data.f.microcode) + "\"";
+
+        // Don't re-download the VCEK from the KDS server if you already have it
+        if (sev::get_file_size(pem_cert_w_path) != 0) {
+            // printf("VCEK already exists, not re-downloading\n");
+            cmd_ret = SEV_RET_SUCCESS;
+            break;
+        }
+
+        // The AMD KDS server only accepts requests every 10 seconds
+        bool cert_found = false;
+        int sec_to_sleep = 6;
+        int retries = 0;
+        int max_retries = (int)((10/sec_to_sleep)+2);
+        while (!cert_found && retries <= max_retries) {
+            if (!sev::execute_system_command(cmd, &output)) {
+                printf("Error: pipe not opened for system command\n");
+                cmd_ret = SEV_RET_UNSUPPORTED;
+                break;
+            }
+
+            // Check if the file got downloaded
+            if (sev::get_file_size(der_cert_w_path) != 0) {
+                cert_found = true;
+                break;
+            }
+            sleep(sec_to_sleep);
+            printf("Trying again\n");
+            retries++;
+        }
+        if (!cert_found) {
+            printf("Error: command to get vcek_ask cert failed\n");
+            cmd_ret = SEV_RET_UNSUPPORTED;
+            break;
+        }
+
+        // Convert the file from a DER to a PEM file
+        convert_der_to_pem(der_cert_w_path, pem_cert_w_path);
+    } while (0);
+
+    return cmd_ret;
+}
 int SEVDevice::request_platform_status(snp_platform_status_buffer *plat_status) {
     int cmd_ret = SEV_RET_UNSUPPORTED;
 
     memset(plat_status, 0, sizeof(snp_platform_status_buffer));
 
     sev_ioctl(SEV_SNP_PLATFORM_STATUS, plat_status, &cmd_ret);
+
+    return cmd_ret;
+}
+
+int SEVDevice::request_platform_status(snp_platform_status_buffer *plat_status, std::vector<double>& measurements) {
+    int cmd_ret = SEV_RET_UNSUPPORTED;
+
+    memset(plat_status, 0, sizeof(snp_platform_status_buffer));
+
+    sev_ioctl(SEV_SNP_PLATFORM_STATUS, plat_status, &cmd_ret, measurements);
 
     return cmd_ret;
 }

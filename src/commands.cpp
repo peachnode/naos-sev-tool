@@ -26,6 +26,8 @@
 #include <openssl/x509v3.h>
 #include <stdio.h>          // printf
 #include <stdlib.h>         // malloc
+#include <vector>
+
 
 Command::Command(void)
        : m_sev_device(&SEVDevice::get_sev_device())
@@ -51,6 +53,15 @@ int Command::factory_reset(void)
     int cmd_ret = -1;
 
     cmd_ret = m_sev_device->factory_reset();
+
+    return (int)cmd_ret;
+}
+
+int Command::factory_reset(std::vector<double>& measurements)
+{
+    int cmd_ret = -1;
+
+    cmd_ret = m_sev_device->factory_reset(measurements);
 
     return (int)cmd_ret;
 }
@@ -84,6 +95,36 @@ int Command::platform_status(void)
     return (int)cmd_ret;
 }
 
+int Command::platform_status(std::vector<double> &measurements)
+{
+    uint8_t data[sizeof(sev_platform_status_cmd_buf)];
+    sev_platform_status_cmd_buf *data_buf = (sev_platform_status_cmd_buf *)&data;
+    int cmd_ret = -1;
+
+    cmd_ret = m_sev_device->platform_status(data, measurements);
+
+    if (cmd_ret == STATUS_SUCCESS) {
+        // Print ID arrays
+        if(m_verbose_flag){
+            printf("api_major:\t%d\n", data_buf->api_major);
+        printf("api_minor:\t%d\n", data_buf->api_minor);
+        printf("platform_state:\t%d\n", data_buf->current_platform_state);
+        if (sev::min_api_version(data_buf->api_major, data_buf->api_minor, 0, 17)) {
+            printf("owner:\t\t%d\n", data_buf->owner);
+            printf("config:\t\t%d\n", data_buf->config);
+        }
+        else {
+            printf("flags:\t\t%d\n",
+                    ((data_buf->owner & PLAT_STAT_OWNER_MASK) << PLAT_STAT_OWNER_MASK) +
+                    ((data_buf->config & PLAT_STAT_ES_MASK) << PLAT_STAT_CONFIGES_OFFSET));
+        }
+        printf("build:\t\t%d\n", data_buf->build_id);
+        printf("guest_count:\t%d\n", data_buf->guest_count);}
+    }
+
+    return (int)cmd_ret;
+}
+
 int Command::pek_gen(void)
 {
     int cmd_ret = -1;
@@ -92,6 +133,16 @@ int Command::pek_gen(void)
 
     return (int)cmd_ret;
 }
+
+int Command::pek_gen(std::vector<double> &measurements)
+{
+    int cmd_ret = -1;
+
+    cmd_ret = m_sev_device->pek_gen(measurements);
+
+    return (int)cmd_ret;
+}
+
 
 int Command::pek_csr(void)
 {
@@ -138,12 +189,108 @@ int Command::pek_csr(void)
 
     return (int)cmd_ret;
 }
+int Command::pek_csr(std::vector<double> &measurements)
+{
+    sev_platform_status_cmd_buf data_buf;
+    uint8_t data[sizeof(sev_pek_csr_cmd_buf)];
+    int cmd_ret = -1;
+    std::string pek_csr_readable_path = m_output_folder + PEK_CSR_READABLE_FILENAME;
+    std::string pek_csr_hex_path = m_output_folder + PEK_CSR_HEX_FILENAME;
 
+    // Populate PEKCSR buffer with CSRLength = 0
+    sev_cert *pek_mem = new sev_cert_t;
+    sev_cert pek_csr;
+
+    if (!pek_mem)
+        return -1;
+
+    cmd_ret = m_sev_device->platform_status((uint8_t *) &data_buf);
+
+    if (cmd_ret != STATUS_SUCCESS)
+            return cmd_ret;
+    if (data_buf.owner != PLATFORM_STATUS_OWNER_SELF) {
+            printf("Error: Platform must be self-owned first for the obtaining ownership procedure to work.");
+            return -1;
+    }
+
+    cmd_ret = m_sev_device->pek_csr(data, pek_mem, &pek_csr, measurements);
+
+    if (cmd_ret == STATUS_SUCCESS) {
+        if (m_verbose_flag) {            // Print off the cert to stdout
+            print_sev_cert_hex(&pek_csr);
+            print_sev_cert_readable(&pek_csr);
+        }
+        if (m_output_folder != "") {     // Print off the cert to a text file
+            std::string pek_csr_readable = "";
+
+            print_sev_cert_readable(&pek_csr, pek_csr_readable);
+            sev::write_file(pek_csr_readable_path, (void *)pek_csr_readable.c_str(), pek_csr_readable.size());
+            sev::write_file(pek_csr_hex_path, (void *)&pek_csr, sizeof(pek_csr));
+        }
+    }
+
+    // Free memory
+    delete pek_mem;
+
+    return (int)cmd_ret;
+}
 int Command::pdh_gen(void)
 {
     int cmd_ret = -1;
 
     cmd_ret = m_sev_device->pdh_gen();
+
+    return (int)cmd_ret;
+}
+
+int Command::pdh_gen(std::vector<double> &measurements)
+{
+    int cmd_ret = -1;
+
+    cmd_ret = m_sev_device->pdh_gen(measurements);
+
+    return (int)cmd_ret;
+}
+
+int Command::pdh_cert_export(std::vector<double> &measurements)
+{
+    uint8_t data[sizeof(sev_pdh_cert_export_cmd_buf)];
+    int cmd_ret = -1;
+    std::string PDH_readable_path = m_output_folder + PDH_READABLE_FILENAME;
+    std::string PDH_path          = m_output_folder + PDH_FILENAME;
+    std::string cc_readable_path  = m_output_folder + CERT_CHAIN_READABLE_FILENAME;
+    std::string cc_path           = m_output_folder + CERT_CHAIN_HEX_FILENAME;
+
+    sev_cert *pdh_cert_mem = new sev_cert_t;
+    sev_cert_chain_buf_t *cert_chain_mem = new sev_cert_chain_buf_t();
+
+    if (!pdh_cert_mem || !cert_chain_mem)
+        return -1;
+
+    cmd_ret = m_sev_device->pdh_cert_export(data, pdh_cert_mem, cert_chain_mem, measurements);
+
+    if (cmd_ret == STATUS_SUCCESS) {
+        if (m_verbose_flag) {            // Print off the cert to stdout
+            // print_sev_cert_readable((sev_cert *)pdh_cert_mem); printf("\n");
+            print_sev_cert_hex((sev_cert *)pdh_cert_mem); printf("\n");
+            print_cert_chain_buf_readable((sev_cert_chain_buf *)cert_chain_mem);
+        }
+        if (m_output_folder != "") {     // Print off the cert to a text file
+            std::string PDH_readable = "";
+            std::string cc_readable = "";
+
+            print_sev_cert_readable((sev_cert *)pdh_cert_mem, PDH_readable);
+            print_cert_chain_buf_readable((sev_cert_chain_buf *)cert_chain_mem, cc_readable);
+            sev::write_file(PDH_readable_path, (void *)PDH_readable.c_str(), PDH_readable.size());
+            sev::write_file(PDH_path, pdh_cert_mem, sizeof(sev_cert));
+            sev::write_file(cc_readable_path, (void *)cc_readable.c_str(), cc_readable.size());
+            sev::write_file(cc_path, cert_chain_mem, sizeof(sev_cert_chain_buf));
+        }
+    }
+
+    // Free memory
+    delete pdh_cert_mem;
+    delete cert_chain_mem;
 
     return (int)cmd_ret;
 }
@@ -367,7 +514,57 @@ int Command::get_id(void)
 
     return (int)cmd_ret;
 }
+// Must always pass in 128 bytes array, because of Linux /dev/sev ioctl
+// doesn't follow the API
+int Command::get_id(std::vector<double> &measurements)
+{
+    uint8_t data[sizeof(sev_get_id_cmd_buf)];
+    sev_get_id_cmd_buf *data_buf = (sev_get_id_cmd_buf *)&data;
+    int cmd_ret = -1;
+    uint32_t default_id_length = 0;
+    std::string id0_path = m_output_folder + GET_ID_S0_FILENAME;
+    std::string id1_path = m_output_folder + GET_ID_S1_FILENAME;
 
+    // Send the first command with a length of 0, then use the returned length
+    // as the input parameter for the 'real' command which will succeed
+    sev_get_id_cmd_buf data_buf_temp;
+    cmd_ret = m_sev_device->get_id((uint8_t *)&data_buf_temp, NULL); // Sets IDLength
+    if (cmd_ret != ERROR_INVALID_LENGTH)     // What we expect to happen
+        return cmd_ret;
+    default_id_length = data_buf_temp.id_length;
+
+    // Always allocate 2 ID's worth because Linux will always write 2 ID's worth.
+    // If you have 1 ID and you are not in Linux, allocating extra is fine
+    void *id_mem = malloc(2*default_id_length);
+    if (!id_mem)
+        return cmd_ret;
+
+    cmd_ret = m_sev_device->get_id(data, id_mem,  measurements, 2*default_id_length);
+
+    if (cmd_ret == STATUS_SUCCESS) {
+        char id0_buf[default_id_length*2+1] = {0};  // 2 chars per byte +1 for null term
+        char id1_buf[default_id_length*2+1] = {0};
+        for (uint8_t i = 0; i < default_id_length; i++) {
+            sprintf(id0_buf+strlen(id0_buf), "%02x", ((uint8_t *)(data_buf->id_p_addr))[i]);
+            sprintf(id1_buf+strlen(id1_buf), "%02x", ((uint8_t *)(data_buf->id_p_addr))[i+default_id_length]);
+        }
+
+        if (m_verbose_flag) {            // Print ID arrays
+            printf("* GetID Socket0:\n%s", id0_buf);
+            printf("\n* GetID Socket1:\n%s", id1_buf);
+            printf("\n");
+        }
+        if (m_output_folder != "") {     // Print the IDs to a text file
+            sev::write_file(id0_path, (void *)id0_buf, sizeof(id0_buf)-1);  // Don't write null term
+            sev::write_file(id1_path, (void *)id1_buf, sizeof(id1_buf)-1);
+        }
+    }
+
+    // Free memory
+    free(id_mem);
+
+    return (int)cmd_ret;
+}
 // ------------------------------------- //
 // ---- Non-ioctl (Custom) commands ---- //
 // ------------------------------------- //
