@@ -12,7 +12,7 @@
         {
             "label": "run sevtool commands",
             "type": "shell",
-            "command": "./run_commands.sh"
+            "command": "./run_commands.sh 10000 2>&1 | grep -v 'Writing to file' | tee output.txt"
         }
         
     ],

@@ -147,9 +147,7 @@ int perform_repetitions_and_analysis(Func func, int repetitions = 10)
     }
 
     // Compute stats
-    auto minmax = std::minmax_element(measurements.begin(), measurements.end());
-    std::cout << "Min: " << *minmax.first << ", Max: " << *minmax.second << std::endl;
-
+    
     double sum = std::accumulate(measurements.begin(), measurements.end(), 0.0);
     double mean = sum / static_cast<double>(measurements.size());
 
@@ -163,15 +161,35 @@ int perform_repetitions_and_analysis(Func func, int repetitions = 10)
     double stdev = std::sqrt(variance);
 
     std::sort(measurements.begin(), measurements.end());
+    auto minmax = std::minmax_element(measurements.begin(), measurements.end());
+
+    // Calculating the quartiles
+    double Q1, Q3;
+
+    int n = measurements.size();
+
+    if (n % 2 == 0)
+    {
+        Q1 = (measurements[n / 4 - 1] + measurements[n / 4]) / 2;
+        Q3 = (measurements[3 * n / 4 - 1] + measurements[3 * n / 4]) / 2;
+    }
+    else
+    {
+        Q1 = measurements[n / 4];
+        Q3 = measurements[3 * n / 4];
+    }
     double median;
     if (measurements.size() % 2 == 0)
         median = (measurements[measurements.size() / 2 - 1] + measurements[measurements.size() / 2]) / 2;
     else
         median = measurements[measurements.size() / 2];
-
+    std::cout << "Min: " << *minmax.first << std::endl;
+    std::cout << "First Quartile (Q1): " << Q1 << std::endl;
+    std::cout << "Median: " << median << std::endl;
+    std::cout << "Third Quartile (Q3): " << Q3 << std::endl;
+    std::cout << "Max: " << *minmax.second << std::endl;
     std::cout << "Number of measurements: " << measurements.size() << std::endl;
     std::cout << "Average: " << mean << std::endl;
-    std::cout << "Median: " << median << std::endl;
     std::cout << "Standard Deviation: " << stdev << std::endl;
     std::cout << "Variance: " << variance << std::endl;
     return cmd_ret;
